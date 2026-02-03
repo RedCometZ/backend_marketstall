@@ -10,6 +10,7 @@ import { PaymentModule } from './payment/payment.module';
 import { BookingModule } from './booking/booking.module';
 import { JwtModule } from '@nestjs/jwt';
 import { jwtConstants } from './user/contants';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { jwtConstants } from './user/contants';
     MarketModule,
     PaymentModule,
     BookingModule,
+    AdminModule,
   ], controllers: [AppController],
   providers: [AppService],
 })

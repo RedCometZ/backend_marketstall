@@ -17,7 +17,7 @@ export class BookingController {
     return this.bookingService.create(createBookingDto);
   }
 
-  @Get()
+  @Get('all')
   findAll() {
     return this.bookingService.findAll();
   }
@@ -45,21 +45,5 @@ export class BookingController {
   @Patch(':id/cancel')
   cancelBooking(@Param('id') id: string) {
     return this.bookingService.cancelBooking(+id);
-  }
-
-  @Post(':id/payment')
-  async submitPayment(@Param('id') id: string, @Body() paymentData: any) {
-    // Get booking to retrieve user_id and price
-    const booking = await this.bookingService.findOne(+id);
-
-    const createPaymentDto: CreatePaymentDto = {
-      booking_id: +id,
-      user_id: paymentData.user_id,
-      price: paymentData.price,
-      proof_of_payment: paymentData.proof_of_payment,
-      payment_status: paymentData.payment_status || 'pending',
-    };
-
-    return this.paymentService.create(createPaymentDto);
   }
 }

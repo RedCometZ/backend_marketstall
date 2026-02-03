@@ -26,10 +26,16 @@ export class Booking {
     // @ManyToOne(() => Market)
     // market: Market;
 
+    @Column()
+    marketId: number;
+
     @ManyToOne(() => Market, (market) => market.bookings)
     market: Market;
 
     @OneToOne(() => Payment, (payment) => payment.booking)
     @JoinColumn({ name: 'pid' })
     payment: Payment;
+
+    @CreateDateColumn()
+    createdAt: Date;
 }

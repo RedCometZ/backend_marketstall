@@ -3,7 +3,7 @@ import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto } from './dto/update-booking.dto';
 import { Booking } from './entities/booking.entity';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
 import { Market } from '../market/entities/market.entity';
 
 @Injectable()
@@ -49,11 +49,25 @@ export class BookingService {
       const booking = this._booking.create({
         user: { id: userId },
         market: { id: marketId },
-        startDate,
-        endDate,
+        startDate: start,  // Use the Date object created above
+        endDate: end,      // Use the Date object created above
         price: totalPrice,
         status: 'pending',
       });
+
+      // 🔴 เช็คว่ามี booking ซ้อนหรือไม่
+      const conflict = await this._booking.findOne({
+        where: {
+          market: { id: marketId },
+          status: In(['pending', 'booked']),
+          startDate: LessThanOrEqual(end),
+          endDate: MoreThanOrEqual(start),
+        },
+      });
+
+      if (conflict) {
+        throw new Error('แผงนี้ถูกจองในช่วงวันที่เลือกแล้ว');
+      }
 
       // 6. Save ลง DB
       const savedBooking = await this._booking.save(booking);
@@ -72,13 +86,16 @@ export class BookingService {
   }
 
 
-  async findAll() {
-    console.log("🚀 ~ BookingService ~ findAll ~ findAll:")
+  async findAll(date?: string) {
+    console.log("🚀 ~ BookingService ~ findAll ~ findAll:", date)
     try {
+      const whereCondition = date ? { startDate: new Date(date) } : {};
 
       const bookings = await this._booking.find({
+        where: whereCondition,
         relations: {
           market: true,
+          user: true,
           payment: true,
         }
       });
@@ -116,8 +133,25 @@ export class BookingService {
     }
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} booking`;
+  async findOne(id: number) {
+    try {
+      const booking = await this._booking.findOne({
+        where: { id },
+        relations: {
+          market: true,
+          user: true,
+          payment: true,
+        }
+      });
+
+      if (!booking) {
+        throw new Error('Booking not found');
+      }
+
+      return booking;
+    } catch (error) {
+      throw error;
+    }
   }
 
   async update(id: number, updateBookingDto: UpdateBookingDto) {

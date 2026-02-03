@@ -7,7 +7,7 @@ export class Payment {
     @PrimaryGeneratedColumn()
     id: number;
 
-    @Column({ nullable: true })
+    @Column({ type: 'longtext', nullable: true })
     proof_of_payment: string;
 
     @Column()

@@ -38,7 +38,12 @@ export class PaymentService {
       payment_date: new Date(),
     });
 
-    return this.paymentRepository.save(payment);
+    const savedPayment = await this.paymentRepository.save(payment);
+
+    // Auto-confirm booking (or set to 'pending_review')
+    await this.bookingRepository.update(booking_id, { status: 'pending_verification' });
+
+    return savedPayment;
   }
 
   async findAll() {

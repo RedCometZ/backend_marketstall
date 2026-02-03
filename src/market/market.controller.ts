@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query } from '@nestjs/common';
 import { MarketService } from './market.service';
 import { CreateMarketDto } from './dto/create-market.dto';
 import { UpdateMarketDto } from './dto/update-market.dto';
@@ -21,6 +21,24 @@ export class MarketController {
   @Patch('booking/:id/cancel')
   cancelBooking(@Param('id') id: string) {
     return this.marketService.cancelBooking(+id);
+  }
+
+  @Get('available')
+  findAvailable(
+    @Query('date') date?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    return this.marketService.findAvailableMarkets(date, startDate, endDate);
+  }
+
+  @Get('status')
+  findStatuses(
+    @Query('date') date?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    return this.marketService.findMarketStatuses(date, startDate, endDate);
   }
 
   @Get()
