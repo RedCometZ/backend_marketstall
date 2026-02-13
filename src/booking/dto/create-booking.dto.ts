@@ -4,4 +4,6 @@ export class CreateBookingDto {
     userId: number;
     startDate: string;
     endDate: string;
+    status?: string;
+    adminId?: number;
 }

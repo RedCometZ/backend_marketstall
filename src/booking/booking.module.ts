@@ -6,8 +6,10 @@ import { Booking } from './entities/booking.entity';
 import { Market } from '../market/entities/market.entity';
 import { PaymentModule } from '../payment/payment.module';
 
+import { Admin } from '../admin/entities/admin.entity';
+
 @Module({
-  imports: [TypeOrmModule.forFeature([Booking, Market]), PaymentModule],
+  imports: [TypeOrmModule.forFeature([Booking, Market, Admin]), PaymentModule],
   controllers: [BookingController],
   providers: [BookingService],
 })

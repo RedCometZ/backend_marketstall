@@ -17,4 +17,10 @@ export class Market {
 
     @OneToMany(() => Booking, (booking) => booking.market)
     bookings: Booking[];
+
+    @Column({ type: 'timestamp', nullable: true })
+    maintenanceEndDate: Date;
+
+    @Column({ type: 'timestamp', nullable: true })
+    maintenanceStartDate: Date;
 }

@@ -13,6 +13,11 @@ export class MarketController {
     return this.marketService.create(createMarketDto);
   }
 
+  @Post('cleanup')
+  cleanup() {
+    return this.marketService.cleanupExpiredBookings();
+  }
+
   @Post('booking')
   createBooking(@Body() createBookingDto: CreateBookingDto) {
     return this.marketService.createBooking(createBookingDto);

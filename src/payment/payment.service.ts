@@ -6,6 +6,7 @@ import { UpdatePaymentDto } from './dto/update-payment.dto';
 import { Payment } from './entities/payment.entity';
 import { Booking } from '../booking/entities/booking.entity';
 import { User } from '../user/entities/user.entity';
+import { Admin } from '../admin/entities/admin.entity';
 
 @Injectable()
 export class PaymentService {
@@ -16,6 +17,8 @@ export class PaymentService {
     private bookingRepository: Repository<Booking>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @InjectRepository(Admin)
+    private adminRepository: Repository<Admin>,
   ) { }
 
   async create(createPaymentDto: CreatePaymentDto) {
@@ -35,7 +38,7 @@ export class PaymentService {
       ...paymentData,
       user,
       booking,
-      payment_date: new Date(),
+      payment_date: createPaymentDto.payment_date ? new Date(createPaymentDto.payment_date) : new Date(),
     });
 
     const savedPayment = await this.paymentRepository.save(payment);
@@ -47,7 +50,10 @@ export class PaymentService {
   }
 
   async findAll() {
-    return this.paymentRepository.find({ relations: ['user', 'booking'] });
+    return this.paymentRepository.find({
+      relations: ['user', 'booking', 'booking.market', 'admin'],
+      order: { payment_date: 'DESC' },
+    });
   }
 
   async findOne(id: number) {
@@ -62,7 +68,33 @@ export class PaymentService {
   }
 
   async update(id: number, updatePaymentDto: UpdatePaymentDto) {
-    return this.paymentRepository.update(id, updatePaymentDto);
+    let admin: Admin | null = null;
+    if (updatePaymentDto.adminId) {
+      admin = await this.adminRepository.findOne({ where: { id: updatePaymentDto.adminId } });
+      if (!admin) {
+        throw new NotFoundException(`Admin with ID ${updatePaymentDto.adminId} not found`);
+      }
+    }
+
+    if (updatePaymentDto.payment_status) {
+      const payment = await this.findOne(id);
+      if (payment && payment.booking) {
+        if (updatePaymentDto.payment_status === 'approved') {
+          // If payment is approved, booking is fully confirmed -> 'booked'
+          await this.bookingRepository.update(payment.booking.id, { status: 'booked' });
+        } else if (updatePaymentDto.payment_status === 'rejected') {
+          // If payment is rejected, booking is rejected
+          await this.bookingRepository.update(payment.booking.id, { status: 'rejected' });
+        }
+      }
+    }
+
+    const { adminId, ...updateData } = updatePaymentDto;
+    return this.paymentRepository.save({
+      id,
+      ...updateData,
+      ...(admin ? { admin } : {})
+    });
   }
 
   async findByUser(userId: number) {

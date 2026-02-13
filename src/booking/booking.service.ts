@@ -5,6 +5,7 @@ import { Booking } from './entities/booking.entity';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, LessThanOrEqual, MoreThanOrEqual } from 'typeorm';
 import { Market } from '../market/entities/market.entity';
+import { Admin } from '../admin/entities/admin.entity';
 
 @Injectable()
 export class BookingService {
@@ -13,12 +14,14 @@ export class BookingService {
     private _market: Repository<Market>,
     @InjectRepository(Booking)
     private _booking: Repository<Booking>,
+    @InjectRepository(Admin)
+    private adminRepository: Repository<Admin>,
   ) { }
 
 
   async create(createBookingDto: CreateBookingDto) {
     try {
-      const { marketId, userId, startDate, endDate } = createBookingDto;
+      const { marketId, userId, startDate, endDate, adminId, status } = createBookingDto;
 
       // 1. แปลงวันที่
       const start = new Date(startDate);
@@ -41,6 +44,15 @@ export class BookingService {
         throw new Error('Market not found');
       }
 
+      // Check admin
+      let admin: Admin | null = null;
+      if (adminId) {
+        admin = await this.adminRepository.findOne({ where: { id: adminId } });
+        if (!admin) {
+          throw new Error('Admin not found');
+        }
+      }
+
       // 4. คำนวณราคาจริง (Total Price for "Pay All at Once")
       const totalPrice = market.price * diffDays;
       console.log('DEBUG PRICE CALC:', { marketPrice: market.price, diffDays, totalPrice });
@@ -52,14 +64,15 @@ export class BookingService {
         startDate: start,  // Use the Date object created above
         endDate: end,      // Use the Date object created above
         price: totalPrice,
-        status: 'pending',
+        status: status || 'booked',
+        ...(admin ? { admin } : {})
       });
 
       // 🔴 เช็คว่ามี booking ซ้อนหรือไม่
       const conflict = await this._booking.findOne({
         where: {
           market: { id: marketId },
-          status: In(['pending', 'booked']),
+          status: In(['pending', 'booked', 'pending_verification']),
           startDate: LessThanOrEqual(end),
           endDate: MoreThanOrEqual(start),
         },
@@ -97,6 +110,7 @@ export class BookingService {
           market: true,
           user: true,
           payment: true,
+          admin: true,
         }
       });
       return {

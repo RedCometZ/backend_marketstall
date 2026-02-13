@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, LessThan, In } from 'typeorm';
 import { CreateMarketDto } from './dto/create-market.dto';
@@ -6,6 +6,7 @@ import { UpdateMarketDto } from './dto/update-market.dto';
 import { CreateBookingDto } from '../booking/dto/create-booking.dto';
 import { Market } from './entities/market.entity';
 import { Booking } from '../booking/entities/booking.entity';
+import { Payment } from '../payment/entities/payment.entity';
 import { User } from '../user/entities/user.entity';
 
 @Injectable()
@@ -17,6 +18,8 @@ export class MarketService {
     private bookingRepository: Repository<Booking>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @InjectRepository(Payment)
+    private paymentRepository: Repository<Payment>,
     private dataSource: DataSource,
   ) { }
 
@@ -56,6 +59,26 @@ export class MarketService {
         return {
           status: 'error market',
           message: 'Market not found',
+        }
+      }
+
+      // Check for maintenance overlap
+      if (market.maintenanceStartDate && market.maintenanceEndDate) {
+        const maintenanceStart = new Date(market.maintenanceStartDate);
+        const maintenanceEnd = new Date(market.maintenanceEndDate);
+        maintenanceStart.setHours(0, 0, 0, 0);
+        maintenanceEnd.setHours(23, 59, 59, 999);
+
+        const bookingStart = new Date(createBookingDto.startDate);
+        const bookingEnd = new Date(createBookingDto.endDate);
+        bookingStart.setHours(0, 0, 0, 0);
+        bookingEnd.setHours(23, 59, 59, 999);
+
+        if (bookingStart <= maintenanceEnd && bookingEnd >= maintenanceStart) {
+          return {
+            status: 'error maintenance',
+            message: 'Stall is under maintenance for the selected dates.',
+          }
         }
       }
 
@@ -104,8 +127,6 @@ export class MarketService {
 
     }
   }
-
-
 
   async findAll() {
     console.log("🚀 ~ MarketService ~ findAll ~ findAll:")
@@ -161,15 +182,38 @@ export class MarketService {
         end: queryEndDate.toISOString().split('T')[0]
       });
 
-      // ดึงแผงทั้งหมดที่มีสถานะ 'available' หรือ 'Available'
+      // ดึงแผงทั้งหมดที่มีสถานะ 'available', 'Available', 'free', 'Free'
       const allMarkets = await this.marketRepository.find({
         where: [
-          { status: 'available' },
-          { status: 'Available' }
+          { status: 'Available' },
+          { status: 'available' }, // Lowercase
+          { status: 'free' },
+          { status: 'Free' },
+          { status: 'maintenance' } // Include maintenance to check if expired/date-based
         ]
       });
 
-      console.log('📊 Total markets with status available:', allMarkets.length);
+      // Filter out active maintenance based on dates
+      const activeMarkets = allMarkets.filter(market => {
+        // Check for maintenance validity by date
+        if (market.maintenanceStartDate && market.maintenanceEndDate) {
+          const start = new Date(market.maintenanceStartDate);
+          const end = new Date(market.maintenanceEndDate);
+          start.setHours(0, 0, 0, 0);
+          end.setHours(23, 59, 59, 999);
+
+          // Check overlap: query overlap with maintenance
+          if (queryStartDate <= end && queryEndDate >= start) {
+            return false; // In maintenance
+          }
+        } else if (market.status.toLowerCase() === 'maintenance') {
+          // Legacy/Permanent maintenance if no dates set
+          return false;
+        }
+        return true;
+      });
+
+      console.log('📊 Total markets with status available (or expired maintenance):', activeMarkets.length);
 
       // ดึงการจองทั้งหมดที่ทับซ้อนกับช่วงวันที่ที่ต้องการ
       const bookings = await this.bookingRepository
@@ -196,7 +240,7 @@ export class MarketService {
       console.log('🔴 Booked market IDs:', Array.from(bookedMarketIds));
 
       // กรองแผงที่ว่าง (ต้องมี status = available และไม่ถูกจอง)
-      const availableMarkets = allMarkets.filter(market => !bookedMarketIds.has(market.id));
+      const availableMarkets = activeMarkets.filter(market => !bookedMarketIds.has(market.id));
 
       console.log('✅ Available markets:', availableMarkets.length);
 
@@ -282,13 +326,26 @@ export class MarketService {
 
       // 3. Map Status
       const marketStatuses = allMarkets.map(market => {
-        let finalStatus = 'free'; // Default
+        let finalStatus = 'available'; // Default state is AVAILABLE (changed from free)
 
-        // เช็ค status ของตัว Market เองก่อน (เช่น ปิดปรับปรุง)
-        if (market.status.toLowerCase() === 'maintenance') {
-          finalStatus = 'maintenance';
-        } else {
-          // เช็ค Booking
+        // 1. Check Maintenance (Highest Priority)
+        // Maintenance is determined by date range, not just static status
+        if (market.maintenanceStartDate && market.maintenanceEndDate) {
+          const maintenanceStart = new Date(market.maintenanceStartDate);
+          const maintenanceEnd = new Date(market.maintenanceEndDate);
+          // Ensure strict date comparison
+          maintenanceStart.setHours(0, 0, 0, 0);
+          maintenanceEnd.setHours(23, 59, 59, 999);
+
+          // Check overlap
+          // queryStart <= maintenanceEnd AND queryEnd >= maintenanceStart
+          if (queryStartDate <= maintenanceEnd && queryEndDate >= maintenanceStart) {
+            finalStatus = 'maintenance';
+          }
+        }
+
+        // 2. Check Bookings (If not maintenance)
+        if (finalStatus !== 'maintenance') {
           const booking = bookingMap.get(market.id);
           if (booking) {
             if (booking.status === 'booked') {
@@ -299,13 +356,25 @@ export class MarketService {
           }
         }
 
+        // 3. Check for "Disabled" state if applicable
+        if (market.status.toLowerCase() === 'disabled') {
+          finalStatus = 'disabled';
+        }
+
         return {
           id: market.id,
           code: market.code,
           price: market.price,
-          status: finalStatus,
-          // อาจจะส่งข้อมูล booking กลับไปด้วยก็ได้ถ้าจำเป็น
-          bookingId: bookingMap.get(market.id)?.id || null
+          status: finalStatus.toUpperCase(), // Return uppercase as requested (AVAILABLE, BOOKED, PENDING, MAINTENANCE)
+          // Send maintenance details for frontend to show "Upcoming Maintenance" if needed
+          maintenance: (market.maintenanceStartDate && market.maintenanceEndDate) ? {
+            startDate: market.maintenanceStartDate,
+            endDate: market.maintenanceEndDate
+          } : null,
+          booking: bookingMap.get(market.id) ? {
+            id: bookingMap.get(market.id).id,
+            status: bookingMap.get(market.id).status
+          } : null
         };
       });
 
@@ -339,9 +408,52 @@ export class MarketService {
   }
 
   async update(id: number, updateMarketDto: UpdateMarketDto) {
+    const market = await this.marketRepository.findOne({ where: { id } });
+    if (!market) {
+      throw new NotFoundException(`Market with ID ${id} not found`);
+    }
+
+    // Idempotency check: If trying to set status to what it already is (and no other changes), skip
+    // BUT we must allow date updates if they are changing.
+    const isStatusSame = updateMarketDto.status && market.status === updateMarketDto.status;
+    const isMaintenanceStartSame = updateMarketDto.maintenanceStartDate === undefined || updateMarketDto.maintenanceStartDate === market.maintenanceStartDate;
+    const isMaintenanceEndSame = updateMarketDto.maintenanceEndDate === undefined || updateMarketDto.maintenanceEndDate === market.maintenanceEndDate;
+    const isPriceSame = updateMarketDto.price === undefined || updateMarketDto.price === market.price;
+
+    if (isStatusSame && isMaintenanceStartSame && isMaintenanceEndSame && isPriceSame) {
+      // Nothing meaningful changed
+      return {
+        generatedMaps: [],
+        raw: [],
+        affected: 0
+      };
+    }
+
+    if (updateMarketDto.maintenanceStartDate && updateMarketDto.maintenanceEndDate) {
+      const start = new Date(updateMarketDto.maintenanceStartDate);
+      const end = new Date(updateMarketDto.maintenanceEndDate);
+
+      if (start > end) {
+        throw new BadRequestException('Maintenance start date must be before end date.');
+      }
+      // Automatically set status to maintenance if dates are valid AND status wasn't explicitly set to something else
+      if (!updateMarketDto.status) {
+        updateMarketDto.status = 'maintenance';
+      }
+    }
+
+    // Logic change: accidentally clearing maintenance dates when setting status to 'available' is BAD.
+    // ONLY clear maintenance dates if they are explicitly sent as null.
+    // The previous logic forced them to null if status != maintenance. We remove that.
+
+    // If changing FROM maintenance TO available (e.g. finishing early), user SHOULD explicitly send null dates.
+    // But if just setting 'available' on a stall that HAS future maintenance, we should keep the dates.
+
+    // Object.assign(market, updateMarketDto);
+    // return await this.marketRepository.save(market);
+    // Use update to return UpdateResult for consistency with previous behavior and idempotency check
     return await this.marketRepository.update(id, updateMarketDto);
   }
-
 
   async remove(id: number) {
     return await this.marketRepository.delete(id);
@@ -360,6 +472,20 @@ export class MarketService {
     // 1. Auto-cancel pending bookings older than 1 minute
     const expiredDate = new Date(Date.now() - 1 * 60 * 1000); // 1 minute ago
 
+    const expiredBookings = await this.bookingRepository.find({
+      where: {
+        status: 'pending',
+        createdAt: LessThan(expiredDate),
+      },
+      relations: { payment: true }
+    });
+
+    for (const booking of expiredBookings) {
+      if (booking.payment && booking.payment.payment_status === 'pending') {
+        await this.paymentRepository.update(booking.payment.id, { payment_status: 'rejected' });
+      }
+    }
+
     const expiredResult = await this.bookingRepository.update({
       status: 'pending',
       createdAt: LessThan(expiredDate),
@@ -370,6 +496,20 @@ export class MarketService {
     // 2. Auto-cancel unconfirmed bookings past their end date
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+
+    const pastDueBookings = await this.bookingRepository.find({
+      where: {
+        status: In(['pending', 'pending_verification']),
+        startDate: LessThan(today),
+      },
+      relations: { payment: true }
+    });
+
+    for (const booking of pastDueBookings) {
+      if (booking.payment && booking.payment.payment_status === 'pending') {
+        await this.paymentRepository.update(booking.payment.id, { payment_status: 'rejected' });
+      }
+    }
 
     const pastDueResult = await this.bookingRepository.update({
       status: In(['pending', 'pending_verification']),
@@ -389,7 +529,5 @@ export class MarketService {
     return 0;
   }
 
-  async setMarketStatus(id: number, status: string) {
-    return await this.marketRepository.update(id, { status });
-  }
+
 }

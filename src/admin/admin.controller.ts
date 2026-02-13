@@ -5,11 +5,26 @@ import { UpdateAdminDto } from './dto/update-admin.dto';
 
 @Controller('admin')
 export class AdminController {
-  constructor(private readonly adminService: AdminService) {}
+  constructor(private readonly adminService: AdminService) { }
 
   @Post()
   create(@Body() createAdminDto: CreateAdminDto) {
     return this.adminService.create(createAdminDto);
+  }
+
+  @Post('login')
+  login(@Body() body: { username: string; password: string }) {
+    return this.adminService.login(body);
+  }
+
+  @Post('check-token')
+  checkToken(@Body() body: { token: string }) {
+    return this.adminService.checkToken(body.token);
+  }
+
+  @Post('refresh-token')
+  refreshToken(@Body() body: { token: string }) {
+    return this.adminService.refreshToken(body.token);
   }
 
   @Get()

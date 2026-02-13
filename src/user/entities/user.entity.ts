@@ -1,4 +1,4 @@
-import { Column, Entity, OneToMany, PrimaryGeneratedColumn } from "typeorm";
+import { Column, Entity, OneToMany, PrimaryGeneratedColumn, CreateDateColumn } from "typeorm";
 import { Booking } from "../../booking/entities/booking.entity";
 import { Payment } from "src/payment/entities/payment.entity";
 
@@ -18,4 +18,8 @@ export class User {
 
     @OneToMany(() => Payment, (payment) => payment.user)
     payments: Payment[];
+
+    @CreateDateColumn()
+    createdAt: Date;
+
 }

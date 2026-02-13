@@ -4,4 +4,5 @@ export class CreatePaymentDto {
     payment_status: string;
     user_id: number;
     booking_id: number;
+    payment_date?: Date;
 }

@@ -2,6 +2,7 @@ import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, CreateDateColumn, On
 import { User } from '../../user/entities/user.entity';
 import { Market } from '../../market/entities/market.entity';
 import { Payment } from 'src/payment/entities/payment.entity';
+import { Admin } from '../../admin/entities/admin.entity';
 
 @Entity()
 export class Booking {
@@ -26,15 +27,15 @@ export class Booking {
     // @ManyToOne(() => Market)
     // market: Market;
 
-    @Column()
-    marketId: number;
 
     @ManyToOne(() => Market, (market) => market.bookings)
     market: Market;
 
     @OneToOne(() => Payment, (payment) => payment.booking)
-    @JoinColumn({ name: 'pid' })
     payment: Payment;
+
+    @ManyToOne(() => Admin, (admin) => admin.bookings)
+    admin: Admin;
 
     @CreateDateColumn()
     createdAt: Date;

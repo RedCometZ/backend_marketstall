@@ -17,4 +17,9 @@ describe('MarketController', () => {
   it('should be defined', () => {
     expect(controller).toBeDefined();
   });
+
+  // Basic check to ensure controller methods are callable
+  it('should have findStatuses method', () => {
+    expect(controller.findStatuses).toBeDefined();
+  });
 });
