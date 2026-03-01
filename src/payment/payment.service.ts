@@ -1,12 +1,14 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, Between } from 'typeorm';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
 import { Payment } from './entities/payment.entity';
 import { Booking } from '../booking/entities/booking.entity';
 import { User } from '../user/entities/user.entity';
 import { Admin } from '../admin/entities/admin.entity';
+import { BookingService } from '../booking/booking.service';
+
 
 @Injectable()
 export class PaymentService {
@@ -19,6 +21,8 @@ export class PaymentService {
     private userRepository: Repository<User>,
     @InjectRepository(Admin)
     private adminRepository: Repository<Admin>,
+    @Inject(forwardRef(() => BookingService))
+    private bookingService: BookingService,
   ) { }
 
   async create(createPaymentDto: CreatePaymentDto) {
@@ -50,6 +54,7 @@ export class PaymentService {
   }
 
   async findAll() {
+    await this.bookingService.cleanupExpiredBookings();
     return this.paymentRepository.find({
       relations: ['user', 'booking', 'booking.market', 'admin'],
       order: { payment_date: 'DESC' },
@@ -98,6 +103,7 @@ export class PaymentService {
   }
 
   async findByUser(userId: number) {
+    await this.bookingService.cleanupExpiredBookings();
     return this.paymentRepository.find({
       where: { user: { id: userId } },
       relations: ['booking', 'booking.market'],
@@ -107,5 +113,128 @@ export class PaymentService {
 
   async remove(id: number) {
     return this.paymentRepository.delete(id);
+  }
+
+  // Helper to calculate revenue based on accrual basis
+  private async calculateRevenueForRange(startDate: Date, endDate: Date) {
+    const payments = await this.paymentRepository.find({
+      where: { payment_status: 'approved' },
+      relations: ['booking']
+    });
+
+    let totalRevenue = 0;
+    let transactionCount = 0;
+
+    for (const payment of payments) {
+      if (!payment.booking || !payment.booking.startDate || !payment.booking.endDate) {
+        if (payment.payment_date >= startDate && payment.payment_date <= endDate) {
+          totalRevenue += Number(payment.price);
+          transactionCount++;
+          console.log(`[Revenue] Simple Payment ID: ${payment.id}, Price: ${payment.price}, Date: ${payment.payment_date}`);
+        }
+        continue;
+      }
+
+      const bookingStart = new Date(payment.booking.startDate);
+      const bookingEnd = new Date(payment.booking.endDate);
+
+      bookingStart.setHours(0, 0, 0, 0);
+      bookingEnd.setHours(0, 0, 0, 0);
+
+      // console.log(`[Revenue] Checking Payment ID: ${payment.id}, Booking Range: ${bookingStart.toISOString()} - ${bookingEnd.toISOString()}, Query Range: ${startDate.toISOString()} - ${endDate.toISOString()}`);
+
+      if (bookingStart <= endDate && bookingEnd >= startDate) {
+        const overlapStart = bookingStart < startDate ? startDate : bookingStart;
+        const overlapEnd = bookingEnd > endDate ? endDate : bookingEnd;
+
+        const overlapTime = overlapEnd.getTime() - overlapStart.getTime();
+        const overlapDays = Math.floor(overlapTime / (1000 * 3600 * 24)) + 1;
+
+        const durationTime = bookingEnd.getTime() - bookingStart.getTime();
+        const totalDurationDays = Math.floor(durationTime / (1000 * 3600 * 24)) + 1;
+
+        console.log(`[Revenue] Payment ID: ${payment.id}, Price: ${payment.price}`);
+        console.log(`  - Booking Duration: ${totalDurationDays} days`);
+        console.log(`  - Overlap: ${overlapDays} days (${overlapStart.toISOString().split('T')[0]} to ${overlapEnd.toISOString().split('T')[0]})`);
+
+        if (totalDurationDays > 0 && overlapDays > 0) {
+          const dailyRate = Number(payment.price) / totalDurationDays;
+          const revenueContribution = dailyRate * overlapDays;
+          totalRevenue += revenueContribution;
+          transactionCount++;
+          console.log(`  - Daily Rate: ${dailyRate}, Contribution: ${revenueContribution}`);
+        }
+      }
+    }
+
+    console.log(`[Revenue] Total Revenue: ${totalRevenue}, Count: ${transactionCount}`);
+
+    return {
+      totalRevenue: Math.round(totalRevenue), // Round to nearest integer
+      transactionCount,
+      startDate: startDate.toISOString().split('T')[0],
+      endDate: endDate.toISOString().split('T')[0]
+    };
+  }
+
+  async getDailyRevenue(date?: string) {
+    const targetDate = date ? new Date(date) : new Date();
+    targetDate.setHours(0, 0, 0, 0);
+
+    const endOfDay = new Date(targetDate);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const result = await this.calculateRevenueForRange(targetDate, endOfDay);
+
+    return {
+      status: 'success',
+      data: {
+        ...result,
+        date: targetDate.toISOString().split('T')[0]
+      }
+    };
+  }
+
+
+
+  async getWeeklyRevenue(date?: string) {
+    const targetDate = date ? new Date(date) : new Date();
+
+    const day = targetDate.getDay();
+    const diff = targetDate.getDate() - day + (day === 0 ? -6 : 1);
+    const startOfWeek = new Date(targetDate.setDate(diff));
+    startOfWeek.setHours(0, 0, 0, 0);
+
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 6);
+    endOfWeek.setHours(23, 59, 59, 999);
+
+    const result = await this.calculateRevenueForRange(startOfWeek, endOfWeek);
+
+    return {
+      status: 'success',
+      data: result
+    };
+  }
+
+  async getMonthlyRevenue(date?: string) {
+    const targetDate = date ? new Date(date) : new Date();
+
+    const startOfMonth = new Date(targetDate.getFullYear(), targetDate.getMonth(), 1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const endOfMonth = new Date(targetDate.getFullYear(), targetDate.getMonth() + 1, 0);
+    endOfMonth.setHours(23, 59, 59, 999);
+
+    const result = await this.calculateRevenueForRange(startOfMonth, endOfMonth);
+
+    return {
+      status: 'success',
+      data: {
+        ...result,
+        month: targetDate.getMonth() + 1,
+        year: targetDate.getFullYear()
+      }
+    };
   }
 }

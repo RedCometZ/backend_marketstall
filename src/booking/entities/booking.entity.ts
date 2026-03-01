@@ -18,7 +18,7 @@ export class Booking {
     @Column({ default: 'pending' })
     status: string;
 
-    @Column({ type: 'decimal', precision: 10, scale: 2 })
+    @Column()
     price: number;
 
     @ManyToOne(() => User, (user) => user.bookings)

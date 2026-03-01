@@ -46,4 +46,9 @@ export class BookingController {
   cancelBooking(@Param('id') id: string) {
     return this.bookingService.cancelBooking(+id);
   }
+
+  @Post('cleanup')
+  cleanup() {
+    return this.bookingService.cleanupExpiredBookings();
+  }
 }

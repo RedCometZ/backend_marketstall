@@ -14,7 +14,7 @@ export class Payment {
     @Column()
     payment_status: string;
 
-    @Column({ type: 'decimal', precision: 10, scale: 2 })
+    @Column()
     price: number;
 
     @ManyToOne(() => User, (user) => user.payments)
