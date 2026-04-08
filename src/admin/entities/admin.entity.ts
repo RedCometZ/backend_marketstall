@@ -13,7 +13,8 @@ export class Admin {
     @Column()
     password: string;
 
-
+    @Column({ default: true })
+    isActive: boolean;
     @OneToMany(() => Payment, (payment) => payment.admin)
     payments: Payment[];
 

@@ -250,8 +250,22 @@ export class BookingService {
   }
 
   async update(id: number, updateBookingDto: UpdateBookingDto) {
-    const update_booking = await this._booking.update(id, updateBookingDto);
-    console.log("🚀 ~ BookingService ~ update ~ update_booking:", update_booking)
+    const { userId, marketId, adminId, startDate, endDate, status, ...rest } = updateBookingDto;
+
+    // Map DTO payload to entity schema
+    const updatePayload: any = { ...rest };
+    if (userId) updatePayload.user = { id: userId };
+    if (marketId) updatePayload.market = { id: marketId };
+    if (adminId) updatePayload.admin = { id: adminId };
+    if (startDate) updatePayload.startDate = new Date(startDate);
+    if (endDate) updatePayload.endDate = new Date(endDate);
+    if (status) updatePayload.status = status;
+
+    // Remove properties that don't exist on the entity directly to avoid errors (e.g. `code`)
+    delete updatePayload.code;
+
+    const update_booking = await this._booking.update(id, updatePayload);
+    console.log("🚀 ~ BookingService ~ update ~ update_booking:", update_booking);
     return update_booking;
   }
 
@@ -262,9 +276,91 @@ export class BookingService {
   }
 
   async cancelBooking(id: number) {
+    const booking = await this._booking.findOne({ where: { id }, relations: { payment: true } });
+    if (booking && booking.payment && booking.payment.payment_status !== 'rejected') {
+      // Automatically reject the payment so it drops out of the revenue calculation
+      await this.paymentRepository.update(booking.payment.id, { payment_status: 'rejected' });
+    }
     const cancel_booking = await this._booking.update(id, { status: 'cancelled' });
     console.log("🚀 ~ BookingService ~ cancelBooking ~ cancel_booking:", cancel_booking)
     return cancel_booking;
+  }
+
+  async earlyCheckout(id: number) {
+    const booking = await this._booking.findOne({
+      where: { id },
+      relations: { market: true, payment: true }
+    });
+
+    if (!booking) {
+      throw new Error('Booking not found');
+    }
+
+    if (booking.status !== 'booked') {
+      throw new Error('สามารถคืนล็อคได้เฉพาะรายการที่ยืนยันแล้วเท่านั้น (booked)');
+    }
+
+    const start = new Date(booking.startDate);
+    const today = new Date();
+    start.setHours(0, 0, 0, 0);
+    today.setHours(0, 0, 0, 0);
+
+    // Calculate days stayed (0 if cancelled before starting)
+    const diffTime = today.getTime() - start.getTime();
+
+    // If not even started yet, perform a full CANCEL instead of a partial early checkout
+    if (diffTime < 0) {
+      booking.status = 'cancelled';
+      const refundAmount = booking.price; // Admin must refund everything
+
+      const savedBooking = await this._booking.save(booking);
+
+      if (booking.payment) {
+        // Reject the payment so it's fully excluded from revenue
+        await this.paymentRepository.update(booking.payment.id, { payment_status: 'rejected' });
+      }
+
+      return {
+        status: 'success',
+        data: savedBooking,
+        refundAmount: refundAmount
+      };
+    }
+
+    // Normal mid-stay early checkout logic
+    let daysStayed = Math.round(diffTime / (1000 * 60 * 60 * 24)) + 1;
+
+    // Original duration
+    const origEnd = new Date(booking.endDate);
+    origEnd.setHours(0, 0, 0, 0);
+    const origDiff = origEnd.getTime() - start.getTime();
+    const origDays = Math.round(origDiff / (1000 * 60 * 60 * 24)) + 1;
+
+    let newPrice = booking.price;
+    if (daysStayed < origDays) {
+      // Recalculate based on actual stayed days and daily market price
+      newPrice = booking.market.price * daysStayed;
+    }
+
+    const refundAmount = booking.price - newPrice;
+
+    // 1. Update Booking
+    booking.endDate = today;
+    booking.price = newPrice;
+    booking.status = 'finished'; // Free up the stall for tomorrow
+
+    const savedBooking = await this._booking.save(booking);
+
+    // 2. Update Payment
+    if (booking.payment) {
+      await this.paymentRepository.update(booking.payment.id, { price: newPrice });
+    }
+
+    return {
+      status: 'success',
+      data: savedBooking,
+      refundAmount: refundAmount > 0 ? refundAmount : 0
+    };
   }
 
   async cleanupExpiredBookings() {

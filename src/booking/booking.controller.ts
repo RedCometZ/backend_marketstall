@@ -47,6 +47,11 @@ export class BookingController {
     return this.bookingService.cancelBooking(+id);
   }
 
+  @Patch(':id/checkout')
+  earlyCheckout(@Param('id') id: string) {
+    return this.bookingService.earlyCheckout(+id);
+  }
+
   @Post('cleanup')
   cleanup() {
     return this.bookingService.cleanupExpiredBookings();

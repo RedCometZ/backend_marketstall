@@ -54,6 +54,10 @@ export class AdminService {
       throw new NotFoundException('User not found');
     }
 
+    if (admin.isActive === false) {
+      throw new UnauthorizedException('Account is disabled');
+    }
+
     const isMatch = await bcrypt.compare(body.password, admin.password);
     if (!isMatch) {
       throw new UnauthorizedException('Invalid credentials');
@@ -86,8 +90,8 @@ export class AdminService {
 
       if (verify) {
         // Optionally refresh lookup from DB to ensure user wasn't deleted
-        // const admin = await this.findOne(verify.id);
-        // if (!admin) return { status: 'error' };
+        const admin = await this.findOne(verify.id);
+        if (!admin || admin.isActive === false) return { status: 'error', message: 'Account is disabled' };
 
         const expiresIn = moment.unix(verify.exp).diff(moment(), 'seconds');
         return {
@@ -110,6 +114,9 @@ export class AdminService {
       });
 
       if (verify) {
+        const admin = await this.findOne(verify.id);
+        if (!admin || admin.isActive === false) return { status: 'error', message: 'Account is disabled' };
+
         const payload = { id: verify.id, username: verify.username, role: 'admin' };
         const expiresIn = '1h';
         const newToken = await this.jwtService.signAsync(payload, {

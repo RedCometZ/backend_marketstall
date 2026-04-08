@@ -117,48 +117,51 @@ export class PaymentService {
 
   // Helper to calculate revenue based on accrual basis
   private async calculateRevenueForRange(startDate: Date, endDate: Date) {
-    const payments = await this.paymentRepository.find({
-      where: { payment_status: 'approved' },
-      relations: ['booking']
+    const bookings = await this.bookingRepository.find({
+      where: [
+        { status: 'booked' },
+        { status: 'finished' }
+      ]
     });
 
     let totalRevenue = 0;
     let transactionCount = 0;
 
-    for (const payment of payments) {
-      if (!payment.booking || !payment.booking.startDate || !payment.booking.endDate) {
-        if (payment.payment_date >= startDate && payment.payment_date <= endDate) {
-          totalRevenue += Number(payment.price);
-          transactionCount++;
-          console.log(`[Revenue] Simple Payment ID: ${payment.id}, Price: ${payment.price}, Date: ${payment.payment_date}`);
-        }
+    for (const booking of bookings) {
+      if (!booking.startDate || !booking.endDate) {
         continue;
       }
 
-      const bookingStart = new Date(payment.booking.startDate);
-      const bookingEnd = new Date(payment.booking.endDate);
+      const bookingStart = new Date(booking.startDate);
+      const bookingEnd = new Date(booking.endDate);
 
       bookingStart.setHours(0, 0, 0, 0);
       bookingEnd.setHours(0, 0, 0, 0);
 
-      // console.log(`[Revenue] Checking Payment ID: ${payment.id}, Booking Range: ${bookingStart.toISOString()} - ${bookingEnd.toISOString()}, Query Range: ${startDate.toISOString()} - ${endDate.toISOString()}`);
+      // console.log(`[Revenue] Checking Booking ID: ${booking.id}, Booking Range: ${bookingStart.toISOString()} - ${bookingEnd.toISOString()}, Query Range: ${startDate.toISOString()} - ${endDate.toISOString()}`);
 
       if (bookingStart <= endDate && bookingEnd >= startDate) {
-        const overlapStart = bookingStart < startDate ? startDate : bookingStart;
-        const overlapEnd = bookingEnd > endDate ? endDate : bookingEnd;
+        const tempOverlapStart = bookingStart < startDate ? startDate : bookingStart;
+        const tempOverlapEnd = bookingEnd > endDate ? endDate : bookingEnd;
 
-        const overlapTime = overlapEnd.getTime() - overlapStart.getTime();
-        const overlapDays = Math.floor(overlapTime / (1000 * 3600 * 24)) + 1;
+        // Strip times safely before calculating days
+        const overlapStart = new Date(tempOverlapStart);
+        overlapStart.setHours(0, 0, 0, 0);
+        const overlapEnd = new Date(tempOverlapEnd);
+        overlapEnd.setHours(0, 0, 0, 0);
 
-        const durationTime = bookingEnd.getTime() - bookingStart.getTime();
-        const totalDurationDays = Math.floor(durationTime / (1000 * 3600 * 24)) + 1;
+        const overlapTime = Math.abs(overlapEnd.getTime() - overlapStart.getTime());
+        const overlapDays = Math.round(overlapTime / (1000 * 3600 * 24)) + 1;
 
-        console.log(`[Revenue] Payment ID: ${payment.id}, Price: ${payment.price}`);
+        const durationTime = Math.abs(bookingEnd.getTime() - bookingStart.getTime());
+        const totalDurationDays = Math.round(durationTime / (1000 * 3600 * 24)) + 1;
+
+        console.log(`[Revenue] Booking ID: ${booking.id}, Price: ${booking.price}`);
         console.log(`  - Booking Duration: ${totalDurationDays} days`);
         console.log(`  - Overlap: ${overlapDays} days (${overlapStart.toISOString().split('T')[0]} to ${overlapEnd.toISOString().split('T')[0]})`);
 
         if (totalDurationDays > 0 && overlapDays > 0) {
-          const dailyRate = Number(payment.price) / totalDurationDays;
+          const dailyRate = Number(booking.price) / totalDurationDays;
           const revenueContribution = dailyRate * overlapDays;
           totalRevenue += revenueContribution;
           transactionCount++;
@@ -170,7 +173,7 @@ export class PaymentService {
     console.log(`[Revenue] Total Revenue: ${totalRevenue}, Count: ${transactionCount}`);
 
     return {
-      totalRevenue: Math.round(totalRevenue), // Round to nearest integer
+      totalRevenue: totalRevenue, // Do not round to int, let it match frontend exact decimal
       transactionCount,
       startDate: startDate.toISOString().split('T')[0],
       endDate: endDate.toISOString().split('T')[0]

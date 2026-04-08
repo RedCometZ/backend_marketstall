@@ -425,13 +425,23 @@ export class MarketService {
         };
       });
 
+      // Check for ANY BATCH maintenance (even outside selected dates)
+      const anyActiveBatch = await this.stallMaintenanceRepository.findOne({
+        where: {
+          stall: IsNull(),
+          isBatch: true,
+          status: 'ACTIVE',
+        }
+      });
+
       return {
         status: 'success',
         data: marketStatuses,
         meta: {
           date: date || `${startDate} - ${endDate}`,
           total: allMarkets.length,
-          deletedCount: deletedCount
+          deletedCount: deletedCount,
+          hasActiveBatchMaintenance: !!anyActiveBatch
         }
       };
     } catch (error) {
